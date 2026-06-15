@@ -1,0 +1,40 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "A user of the application",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string" },
+        "credits": { "type": "number", "description": "Number of remaining resume generations" },
+        "createdAt": { "type": "number" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["email", "credits", "createdAt", "updatedAt"]
+    },
+    "Resume": {
+      "title": "Resume",
+      "description": "A generated tailored resume",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "jobTitle": { "type": "string" },
+        "atsScore": { "type": "number" },
+        "content": { "type": "string" },
+        "createdAt": { "type": "number" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["userId", "jobTitle", "atsScore", "content", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "Stores user profiles and credits."
+    },
+    "resumes/{resumeId}": {
+      "schema": { "$ref": "#/entities/Resume" },
+      "description": "Stores tracking history of generated resumes."
+    }
+  }
+}
