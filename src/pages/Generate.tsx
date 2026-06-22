@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
 import { Upload, FileText, ChevronRight, Check, X, Zap, ArrowLeft, ArrowRight, Sparkles, AlertCircle } from "lucide-react";
 
 const steps = [
