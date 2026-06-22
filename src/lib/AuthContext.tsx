@@ -15,6 +15,7 @@ interface AuthContextType {
   login: () => Promise<void>;
   logout: () => Promise<void>;
   refreshUserData: () => Promise<void>;
+  loginLocalDev: () => void;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -27,6 +28,16 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const refreshUserData = async (uid?: string) => {
     const userId = uid || user?.uid;
     if (!userId) return;
+
+    if (userId === 'dev-user') {
+      const savedCredits = Number(localStorage.getItem('dev_credits') || '999');
+      setUserData({
+        email: 'developer@local.test',
+        credits: savedCredits
+      });
+      return;
+    }
+
     try {
       const docRef = doc(db, 'users', userId);
       const docSnap = await getDoc(docRef);
@@ -50,6 +61,23 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   useEffect(() => {
+    const devActive = localStorage.getItem('dev_user_active') === 'true';
+    if (devActive) {
+      const devUser = {
+        uid: 'dev-user',
+        email: 'developer@local.test',
+        emailVerified: true,
+      } as any;
+      setUser(devUser);
+      const savedCredits = Number(localStorage.getItem('dev_credits') || '999');
+      setUserData({
+        email: 'developer@local.test',
+        credits: savedCredits
+      });
+      setLoading(false);
+      return;
+    }
+
     const unsubscribe = onAuthStateChanged(auth, async (u) => {
       setUser(u);
       if (u) {
@@ -63,16 +91,37 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   }, []);
 
   const login = async () => {
-    const provider = new GoogleAuthProvider();
-    await signInWithPopup(auth, provider);
+    try {
+      const provider = new GoogleAuthProvider();
+      await signInWithPopup(auth, provider);
+    } catch (e: any) {
+      console.error("Login failed:", e);
+      alert(`Sign-in failed: ${e.message || e}`);
+    }
   };
 
   const logout = async () => {
+    localStorage.removeItem('dev_user_active');
     await signOut(auth);
   };
 
+  const loginLocalDev = () => {
+    const devUser = {
+      uid: 'dev-user',
+      email: 'developer@local.test',
+      emailVerified: true,
+    } as any;
+    setUser(devUser);
+    localStorage.setItem('dev_user_active', 'true');
+    const savedCredits = Number(localStorage.getItem('dev_credits') || '999');
+    setUserData({
+      email: 'developer@local.test',
+      credits: savedCredits
+    });
+  };
+
   return (
-    <AuthContext.Provider value={{ user, userData, loading, login, logout, refreshUserData }}>
+    <AuthContext.Provider value={{ user, userData, loading, login, logout, refreshUserData, loginLocalDev }}>
       {children}
     </AuthContext.Provider>
   );

@@ -1,11 +1,13 @@
+import "dotenv/config";
 import express from "express";
 import path from "path";
 import multer from "multer";
 import fs from "fs";
+import os from "os";
 import { GoogleGenAI } from "@google/genai";
 import { createServer as createViteServer } from "vite";
 
-const upload = multer({ dest: "/tmp/uploads/" });
+const upload = multer({ dest: path.join(os.tmpdir(), "uploads") });
 
 async function startServer() {
   const app = express();
@@ -17,6 +19,51 @@ async function startServer() {
   let ai: GoogleGenAI | null = null;
   if (process.env.GEMINI_API_KEY) {
     ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+  }
+
+  // Model fallback wrapper to handle 429 rate limits, 503 overloads, and 404 model name variations
+  async function generateContentWithFallback(options: {
+    contents: any[];
+    config: any;
+  }) {
+    if (!ai) throw new Error("GEMINI_API_KEY is not configured.");
+    
+    const modelsChain = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-flash-latest"];
+    let lastError: any = null;
+
+    for (const modelName of modelsChain) {
+      try {
+        console.log(`Attempting generation with ${modelName}...`);
+        return await ai.models.generateContent({
+          model: modelName,
+          ...options
+        });
+      } catch (e: any) {
+        lastError = e;
+        const errStr = String(e.message || e);
+        console.warn(`Model ${modelName} failed. Error details:`, errStr);
+        
+        // Fallback on rate limits, service unavailable, or model not found errors
+        if (
+          errStr.includes("429") || 
+          errStr.includes("404") ||
+          errStr.includes("503") ||
+          errStr.includes("RESOURCE_EXHAUSTED") || 
+          errStr.includes("UNAVAILABLE") ||
+          errStr.includes("quota") || 
+          errStr.includes("limit") ||
+          errStr.includes("not found")
+        ) {
+          console.log(`Retrying with next model in chain...`);
+          continue;
+        }
+        
+        // Throw immediately for other syntax/configuration errors
+        throw e;
+      }
+    }
+
+    throw lastError;
   }
 
   app.post("/api/tailor", upload.single("resume"), async (req, res) => {
@@ -68,8 +115,7 @@ Return the response strictly as a JSON object with this shape:
 }
 No other text outside the JSON.`;
 
-      const response = await ai.models.generateContent({
-        model: "gemini-2.0-flash",
+      const response = await generateContentWithFallback({
         contents: [
           { role: "user", parts: [
               { fileData: { fileUri: geminiFile.uri, mimeType: geminiFile.mimeType } },
@@ -162,8 +208,7 @@ Return the response strictly as a JSON object with this shape:
   "summary": string (A short positive message)
 }`;
 
-      const response = await ai.models.generateContent({
-        model: "gemini-2.0-flash",
+      const response = await generateContentWithFallback({
         contents: [
           { role: "user", parts: [
               { fileData: { fileUri: geminiFile.uri, mimeType: geminiFile.mimeType } },

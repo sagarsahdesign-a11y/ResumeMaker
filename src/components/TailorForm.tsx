@@ -10,6 +10,7 @@ import Markdown from 'react-markdown';
 import { db } from '../lib/firebase';
 import { collection, addDoc, doc, updateDoc, increment, serverTimestamp } from 'firebase/firestore';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import ATSScoreCard from "./ATSScoreCard";
 
 export default function TailorForm() {
   const { user, userData, refreshUserData } = useAuth();
@@ -29,6 +30,7 @@ export default function TailorForm() {
     }
     
     const isOwner = user?.email === 'mfl9815268699@gmail.com';
+    const isDev = user?.uid === 'dev-user';
 
     if (!isOwner && (userData?.credits || 0) <= 0) {
       setError("Not enough credits. Please purchase more from the Get Credits tab.");
@@ -41,10 +43,16 @@ export default function TailorForm() {
 
     // Optimistically deduct credit (In production, do this via Cloud Function for security)
     if (user && !isOwner) {
-      updateDoc(doc(db, 'users', user.uid), { 
-        credits: increment(-1),
-        updatedAt: serverTimestamp() 
-      }).catch(console.error);
+      if (isDev) {
+        const currentCredits = Number(localStorage.getItem('dev_credits') || '999');
+        localStorage.setItem('dev_credits', String(Math.max(0, currentCredits - 1)));
+        refreshUserData();
+      } else {
+        updateDoc(doc(db, 'users', user.uid), { 
+          credits: increment(-1),
+          updatedAt: serverTimestamp() 
+        }).catch(console.error);
+      }
     }
 
     try {
@@ -70,14 +78,27 @@ export default function TailorForm() {
 
       // Save to history
       if (user) {
-        await addDoc(collection(db, 'resumes'), {
-          userId: user.uid,
-          jobTitle: jobDescription.substring(0, 50) + "...", // Quick extract
-          atsScore: Number(data.atsScore) || 0,
-          content: data.tailoredResumeMarkdown,
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp()
-        });
+        if (isDev) {
+          const localResumes = JSON.parse(localStorage.getItem('dev_resumes') || '[]');
+          localResumes.unshift({
+            id: Math.random().toString(36).substring(2),
+            userId: user.uid,
+            jobTitle: jobDescription.substring(0, 50) + "...",
+            atsScore: Number(data.atsScore) || 0,
+            content: data.tailoredResumeMarkdown,
+            createdAt: new Date().toISOString()
+          });
+          localStorage.setItem('dev_resumes', JSON.stringify(localResumes));
+        } else {
+          await addDoc(collection(db, 'resumes'), {
+            userId: user.uid,
+            jobTitle: jobDescription.substring(0, 50) + "...", // Quick extract
+            atsScore: Number(data.atsScore) || 0,
+            content: data.tailoredResumeMarkdown,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp()
+          });
+        }
       }
 
     } catch (e: any) {
@@ -85,10 +106,16 @@ export default function TailorForm() {
       setError(e.message);
       // Give credit back on failure
       if (user && !isOwner) {
-        updateDoc(doc(db, 'users', user.uid), { 
-          credits: increment(1),
-          updatedAt: serverTimestamp() 
-        }).catch(console.error);
+        if (isDev) {
+          const currentCredits = Number(localStorage.getItem('dev_credits') || '999');
+          localStorage.setItem('dev_credits', String(currentCredits + 1));
+          refreshUserData();
+        } else {
+          updateDoc(doc(db, 'users', user.uid), { 
+            credits: increment(1),
+            updatedAt: serverTimestamp() 
+          }).catch(console.error);
+        }
       }
     } finally {
       setLoading(false);
@@ -135,64 +162,69 @@ export default function TailorForm() {
     const blob = new Blob(['\ufeff', htmlContent], {
         type: 'application/msword'
     });
-    const url = 'data:application/vnd.ms-word;charset=utf-8,' + encodeURIComponent(htmlContent);
+    const url = URL.createObjectURL(blob);
     const downloadLink = document.createElement("a");
     document.body.appendChild(downloadLink);
     downloadLink.href = url;
     downloadLink.download = 'Tailored_Resume.doc';
     downloadLink.click();
     document.body.removeChild(downloadLink);
+    URL.revokeObjectURL(url);
   };
 
   return (
-    <div className="grid lg:grid-cols-2 gap-8 items-start">
-      <Card className="shadow-lg border-gray-200 bg-white rounded-xl">
-        <CardHeader>
-          <CardTitle className="text-gray-900">Configure Application</CardTitle>
-          <CardDescription className="text-gray-500">Upload your base resume and target job to generate a tailored version instantly.</CardDescription>
+    <div className="grid lg:grid-cols-2 gap-8 items-start animate-in fade-in zoom-in-95 duration-300">
+      {/* Left Column - Configurations */}
+      <Card className="border-0 shadow-lg bg-white rounded-3xl overflow-hidden p-4">
+        <CardHeader className="border-b-2 border-dark-brand/5 pb-6">
+          <CardTitle className="text-3xl font-display uppercase tracking-wider text-dark-brand">Configure Application</CardTitle>
+          <CardDescription className="text-base text-gray-500 font-medium">Upload your base resume and target job description to generate a tailored version instantly.</CardDescription>
         </CardHeader>
-        <CardContent className="space-y-6">
-          <div className="space-y-2">
-            <Label htmlFor="resume" className="text-xs font-bold uppercase tracking-wider text-gray-500">Master Resume (PDF/DOCX)</Label>
-            <Input id="resume" type="file" accept=".pdf,.doc,.docx" onChange={(e) => setFile(e.target.files?.[0] || null)} className="bg-gray-50 border-gray-200 rounded-lg text-sm text-gray-700 focus:ring-blue-100 focus:border-blue-500 transition-all" />
+        <CardContent className="pt-6 space-y-6">
+          {/* File Upload */}
+          <div className="space-y-2.5">
+            <Label htmlFor="resume" className="text-xs font-bold uppercase tracking-widest text-violet-brand/80">Master Resume (PDF/DOCX)</Label>
+            <Input id="resume" type="file" accept=".pdf,.doc,.docx" onChange={(e) => setFile(e.target.files?.[0] || null)} className="bg-gray-50 border-2 border-dark-brand/10 hover:border-violet-brand rounded-2xl text-sm text-gray-700 p-3 h-auto cursor-pointer focus:ring-0 focus:border-violet-brand transition-all" />
           </div>
 
-          <div className="space-y-2">
-            <Label className="text-xs font-bold uppercase tracking-wider text-gray-500">Target Job Description</Label>
+          {/* Job Description Textarea */}
+          <div className="space-y-2.5">
+            <Label className="text-xs font-bold uppercase tracking-widest text-violet-brand/80">Target Job Description</Label>
             <Textarea 
-              className="h-48 resize-none text-sm bg-gray-50 border border-gray-200 rounded-xl leading-relaxed text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-500 transition-all p-4" 
+              className="h-44 resize-none text-sm bg-gray-50 border-2 border-dark-brand/10 rounded-2xl leading-relaxed text-gray-700 focus:outline-none focus:ring-0 focus:border-violet-brand transition-all p-4" 
               placeholder="Paste job description here..."
               value={jobDescription}
               onChange={e => setJobDescription(e.target.value)}
             />
           </div>
 
-          <div className="space-y-2">
-            <Label className="text-xs font-bold uppercase tracking-wider text-gray-500">Template Style</Label>
+          {/* Template Style trigger */}
+          <div className="space-y-2.5">
+            <Label className="text-xs font-bold uppercase tracking-widest text-violet-brand/80">Template Style</Label>
             <Dialog>
-              <DialogTrigger className="w-full bg-white border border-gray-200 rounded-xl p-4 flex items-center justify-between hover:bg-gray-50 transition-colors">
+              <DialogTrigger className="w-full bg-white border-2 border-dark-brand/10 rounded-2xl p-4 flex items-center justify-between hover:bg-gray-50 transition-colors cursor-pointer">
                   <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 bg-blue-50 rounded-lg flex items-center justify-center text-blue-600">
-                      <FileText className="w-5 h-5" />
+                    <div className="w-11 h-11 bg-violet-brand/10 rounded-xl flex items-center justify-center text-violet-brand">
+                      <FileText className="w-5.5 h-5.5" />
                     </div>
                     <div className="text-left">
-                      <div className="text-sm font-semibold text-gray-900">{template}</div>
-                      <div className="text-xs text-gray-500">Document Size: A4</div>
+                      <div className="text-base font-bold text-dark-brand">{template}</div>
+                      <div className="text-xs text-gray-400 font-medium">Document Size: A4</div>
                     </div>
                   </div>
-                  <div className="text-sm font-medium text-blue-600 bg-blue-50 px-3 py-1 rounded-full">Change</div>
+                  <div className="text-xs font-bold text-violet-brand bg-violet-brand/10 px-4 py-2 rounded-full uppercase tracking-wider">Change</div>
               </DialogTrigger>
-              <DialogContent className="max-w-2xl">
+              <DialogContent className="max-w-2xl rounded-3xl border-0 p-6">
                 <DialogHeader>
-                  <DialogTitle className="text-center text-xl text-gray-900">Select a template</DialogTitle>
+                  <DialogTitle className="text-center text-2xl font-display uppercase tracking-wider text-dark-brand">Select a template</DialogTitle>
                 </DialogHeader>
-                <div className="grid grid-cols-2 gap-6 p-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 p-2">
                   {/* Template 1: ATS Classic / Ivy League */}
                   <div 
                     onClick={() => setTemplate('ATS Classic')}
-                    className={`cursor-pointer rounded-xl border-2 transition-all p-2 flex flex-col items-center gap-3 ${template === 'ATS Classic' ? 'border-green-500 bg-green-50/10' : 'border-transparent hover:border-gray-200'}`}
+                    className={`cursor-pointer rounded-2xl border-2 transition-all p-2 flex flex-col items-center gap-3 ${template === 'ATS Classic' ? 'border-orange-brand bg-orange-brand/5' : 'border-transparent hover:border-gray-200'}`}
                   >
-                    <div className="w-full aspect-[1/1.4] bg-white border border-gray-200 shadow-sm p-4 relative overflow-hidden">
+                    <div className="w-full aspect-[1/1.4] bg-white border border-gray-200 shadow-sm p-4 relative overflow-hidden rounded-lg">
                       <div className="w-full h-8 flex flex-col items-center gap-1 border-b border-gray-200 pb-2 mb-2">
                         <div className="w-1/2 h-2 bg-gray-800 rounded-full"></div>
                         <div className="w-1/3 h-1 bg-gray-400 rounded-full"></div>
@@ -218,21 +250,21 @@ export default function TailorForm() {
                         </div>
                       </div>
                       {template === 'ATS Classic' && (
-                        <div className="absolute bottom-0 right-0 w-8 h-8 bg-green-500 rotate-45 translate-x-4 translate-y-4"></div>
+                        <div className="absolute bottom-0 right-0 w-8 h-8 bg-orange-brand rotate-45 translate-x-4 translate-y-4"></div>
                       )}
                       {template === 'ATS Classic' && (
                         <CheckCircle className="absolute bottom-1 right-1 w-4 h-4 text-white z-10" />
                       )}
                     </div>
-                    <span className={`font-medium ${template === 'ATS Classic' ? 'text-green-600' : 'text-gray-900'}`}>Ivy League (ATS)</span>
+                    <span className={`font-display text-lg ${template === 'ATS Classic' ? 'text-orange-brand' : 'text-gray-900'}`}>Ivy League (ATS)</span>
                   </div>
 
                   {/* Template 2: Double Column */}
                   <div 
                     onClick={() => setTemplate('Double Column')}
-                    className={`cursor-pointer rounded-xl border-2 transition-all p-2 flex flex-col items-center gap-3 ${template === 'Double Column' ? 'border-green-500 bg-green-50/10' : 'border-transparent hover:border-gray-200'}`}
+                    className={`cursor-pointer rounded-2xl border-2 transition-all p-2 flex flex-col items-center gap-3 ${template === 'Double Column' ? 'border-orange-brand bg-orange-brand/5' : 'border-transparent hover:border-gray-200'}`}
                   >
-                    <div className="w-full aspect-[1/1.4] bg-white border border-gray-200 shadow-sm relative overflow-hidden flex">
+                    <div className="w-full aspect-[1/1.4] bg-white border border-gray-200 shadow-sm relative overflow-hidden flex rounded-lg">
                       <div className="w-1/3 h-full border-r border-gray-200 p-2 space-y-3 bg-gray-50/50">
                         <div className="flex flex-col gap-1">
                           <div className="w-3/4 h-2 bg-gray-800 rounded-full"></div>
@@ -268,21 +300,21 @@ export default function TailorForm() {
                         </div>
                       </div>
                       {template === 'Double Column' && (
-                        <div className="absolute bottom-0 right-0 w-8 h-8 bg-green-500 rotate-45 translate-x-4 translate-y-4"></div>
+                        <div className="absolute bottom-0 right-0 w-8 h-8 bg-orange-brand rotate-45 translate-x-4 translate-y-4"></div>
                       )}
                       {template === 'Double Column' && (
                         <CheckCircle className="absolute bottom-1 right-1 w-4 h-4 text-white z-10" />
                       )}
                     </div>
-                    <span className={`font-medium ${template === 'Double Column' ? 'text-green-600' : 'text-gray-900'}`}>Double Column</span>
+                    <span className={`font-display text-lg ${template === 'Double Column' ? 'text-orange-brand' : 'text-gray-900'}`}>Double Column</span>
                   </div>
 
                   {/* Template 3: Modern Dark */}
                   <div 
                     onClick={() => setTemplate('Modern Dark')}
-                    className={`cursor-pointer rounded-xl border-2 transition-all p-2 flex flex-col items-center gap-3 ${template === 'Modern Dark' ? 'border-green-500 bg-green-50/10' : 'border-transparent hover:border-gray-200'}`}
+                    className={`cursor-pointer rounded-2xl border-2 transition-all p-2 flex flex-col items-center gap-3 ${template === 'Modern Dark' ? 'border-orange-brand bg-orange-brand/5' : 'border-transparent hover:border-gray-200'}`}
                   >
-                    <div className="w-full aspect-[1/1.4] bg-white border border-gray-200 shadow-sm relative overflow-hidden flex">
+                    <div className="w-full aspect-[1/1.4] bg-white border border-gray-200 shadow-sm relative overflow-hidden flex rounded-lg">
                       <div className="w-2/3 h-full p-2 space-y-4">
                          <div className="flex flex-col gap-1 pb-2 border-b border-gray-200">
                           <div className="w-1/2 h-2 bg-gray-800 rounded-full"></div>
@@ -303,21 +335,21 @@ export default function TailorForm() {
                         <div className="w-full h-1 bg-slate-500"></div>
                       </div>
                       {template === 'Modern Dark' && (
-                        <div className="absolute bottom-0 right-0 w-8 h-8 bg-green-500 rotate-45 translate-x-4 translate-y-4 z-10"></div>
+                        <div className="absolute bottom-0 right-0 w-8 h-8 bg-orange-brand rotate-45 translate-x-4 translate-y-4 z-10"></div>
                       )}
                       {template === 'Modern Dark' && (
                         <CheckCircle className="absolute bottom-1 right-1 w-4 h-4 text-white z-20" />
                       )}
                     </div>
-                    <span className={`font-medium ${template === 'Modern Dark' ? 'text-green-600' : 'text-gray-900'}`}>Modern Dark Sidebar</span>
+                    <span className={`font-display text-lg ${template === 'Modern Dark' ? 'text-orange-brand' : 'text-gray-900'}`}>Modern Dark Sidebar</span>
                   </div>
 
                   {/* Template 4: Student/Fresher */}
                   <div 
                     onClick={() => setTemplate('Student/Fresher')}
-                    className={`cursor-pointer rounded-xl border-2 transition-all p-2 flex flex-col items-center gap-3 ${template === 'Student/Fresher' ? 'border-green-500 bg-green-50/10' : 'border-transparent hover:border-gray-200'}`}
+                    className={`cursor-pointer rounded-2xl border-2 transition-all p-2 flex flex-col items-center gap-3 ${template === 'Student/Fresher' ? 'border-orange-brand bg-orange-brand/5' : 'border-transparent hover:border-gray-200'}`}
                   >
-                    <div className="w-full aspect-[1/1.4] bg-white border border-gray-200 shadow-sm p-4 relative overflow-hidden flex flex-col">
+                    <div className="w-full aspect-[1/1.4] bg-white border border-gray-200 shadow-sm p-4 relative overflow-hidden flex flex-col rounded-lg">
                       <div className="flex gap-2 mb-3">
                          <div className="w-8 h-8 rounded-full bg-gray-200"></div>
                          <div className="flex-1 space-y-1 py-1">
@@ -341,114 +373,136 @@ export default function TailorForm() {
                         </div>
                       </div>
                       {template === 'Student/Fresher' && (
-                        <div className="absolute bottom-0 right-0 w-8 h-8 bg-green-500 rotate-45 translate-x-4 translate-y-4"></div>
+                        <div className="absolute bottom-0 right-0 w-8 h-8 bg-orange-brand rotate-45 translate-x-4 translate-y-4"></div>
                       )}
                       {template === 'Student/Fresher' && (
                         <CheckCircle className="absolute bottom-1 right-1 w-4 h-4 text-white z-10" />
                       )}
                     </div>
-                    <span className={`font-medium ${template === 'Student/Fresher' ? 'text-green-600' : 'text-gray-900'}`}>Professional Modern</span>
+                    <span className={`font-display text-lg ${template === 'Student/Fresher' ? 'text-orange-brand' : 'text-gray-900'}`}>Professional Modern</span>
                   </div>
                 </div>
 
-                <div className="mt-4 pt-4 border-t border-gray-200 flex items-center justify-between">
+                <div className="mt-6 pt-4 border-t border-gray-200 flex items-center justify-between">
                    <div className="flex items-center gap-3">
-                     <span className="text-sm font-medium text-gray-700">Document size:</span>
-                     <div className="flex bg-gray-100 p-1 rounded-lg">
-                       <button className="px-4 py-1 text-sm font-medium bg-white shadow-sm rounded text-green-600">A4</button>
-                       <button className="px-4 py-1 text-sm font-medium text-gray-500 hover:text-gray-900">US Letter</button>
+                     <span className="text-sm font-semibold text-gray-700">Document Size:</span>
+                     <div className="flex bg-gray-100 p-1 rounded-xl">
+                       <button className="px-4 py-1.5 text-xs font-bold bg-white shadow-sm rounded-lg text-violet-brand">A4</button>
+                       <button className="px-4 py-1.5 text-xs font-bold text-gray-500 hover:text-gray-950">US Letter</button>
                      </div>
                    </div>
-                   <DialogTrigger className="inline-flex items-center justify-center rounded-lg text-sm font-medium h-9 px-6 bg-green-500 hover:bg-green-600 text-white">Continue Editing</DialogTrigger>
+                   <DialogTrigger className="inline-flex items-center justify-center rounded-xl text-xs font-bold uppercase tracking-wider h-10 px-6 bg-violet-brand hover:opacity-95 text-white cursor-pointer">Continue</DialogTrigger>
                 </div>
               </DialogContent>
             </Dialog>
           </div>
 
-          {error && <div className="text-red-600 font-medium text-sm flex items-center gap-2 bg-red-50 p-3 rounded-lg border border-red-100"><AlertCircle className="w-4 h-4"/>{error}</div>}
+          {error && <div className="text-red-600 font-semibold text-sm flex items-center gap-2 bg-red-50 p-3.5 rounded-2xl border border-red-150"><AlertCircle className="w-4.5 h-4.5 shrink-0"/>{error}</div>}
 
           <div className="pt-2">
             <Button 
-              className="w-full bg-gray-900 hover:bg-black text-white font-semibold py-6 rounded-xl shadow-lg transition-transform active:scale-[0.98] flex items-center justify-center gap-3" 
+              className="w-full bg-orange-brand hover:opacity-95 text-white font-display uppercase tracking-wider text-lg py-6.5 rounded-2xl shadow-md transition-all cursor-pointer active:scale-[0.98] flex items-center justify-center gap-3" 
               onClick={handleGenerate} 
               disabled={loading}
             >
-              {loading ? <><Loader2 className="mr-2 animate-spin w-5 h-5" /> Optimizing Resume...</> : 'Optimize Resume for Role'}
+              {loading ? <><Loader2 className="mr-2 animate-spin w-5.5 h-5.5" /> Optimizing Resume...</> : 'Optimize Resume for Role'}
             </Button>
-            <p className="text-center text-[11px] text-gray-400 mt-3 italic">⚡ AI will analyze your experience and optimize keywords.</p>
+            <p className="text-center text-xs text-gray-400 mt-3 font-semibold uppercase tracking-wide">⚡ Gemini AI will automatically structure experience & keywords</p>
           </div>
         </CardContent>
       </Card>
 
+      {/* Right Column - Previews & Analysis */}
       <div className="space-y-6">
         {result ? (
           <>
-            <Card className="bg-white shadow-xl border border-blue-50 border-b-4 border-b-blue-600 rounded-2xl relative overflow-hidden">
-              <CardHeader className="pb-4 relative z-10 border-b border-gray-100 bg-gray-50/50">
-                <CardTitle className="text-xl flex items-center gap-2 text-gray-900">
-                  <CheckCircle className="text-blue-600 w-6 h-6" />
-                  Resume Analysis
-                </CardTitle>
-                <div className="flex items-center gap-4 mt-2">
-                  <div className="flex-1">
-                    <div className="flex justify-between text-xs mb-1">
-                      <span className="font-medium text-gray-700">ATS Match Score</span>
-                      <span className="font-bold text-blue-600">{result.atsScore}%</span>
-                    </div>
-                    <div className="w-full bg-gray-200 rounded-full h-2">
-                      <div className="bg-blue-600 h-2 rounded-full" style={{ width: `${result.atsScore}%` }}></div>
-                    </div>
-                  </div>
+            {/* Slide-style Analysis block */}
+            <Card className="bg-violet-brand shadow-xl border-0 text-white rounded-3xl overflow-hidden relative">
+              <div className="absolute top-0 right-0 w-32 h-32 bg-white/5 rounded-full blur-2xl"></div>
+              <CardHeader className="pb-4 relative z-10 border-b border-white/10 bg-white/5 p-6 flex flex-row items-center gap-6">
+                <ATSScoreCard score={result.atsScore} label="" size="sm" animate={true} />
+                <div className="flex-1">
+                  <CardTitle className="text-2xl font-display uppercase tracking-wider flex items-center gap-2.5 text-white">
+                    Resume Analysis
+                  </CardTitle>
+                  <p className="text-xs text-violet-200 mt-1 uppercase font-bold tracking-wider">
+                    Score calculated based on keywords and skills matching the role.
+                  </p>
                 </div>
               </CardHeader>
               <CardContent className="p-0 text-sm relative z-10">
-                <div className="grid grid-cols-1 md:grid-cols-3 divide-y md:divide-y-0 md:divide-x divide-gray-100">
-                   <div className="p-4">
-                      <span className="text-[10px] font-bold uppercase tracking-widest text-gray-500 block mb-3">Missing Keywords</span>
+                <div className="grid grid-cols-1 md:grid-cols-3 divide-y md:divide-y-0 md:divide-x divide-white/10">
+                   {/* Missing Keywords */}
+                   <div className="p-5">
+                      <span className="text-[10px] font-bold uppercase tracking-widest text-violet-200 block mb-3.5">Missing Keywords</span>
                       <ul className="space-y-2">
-                        {result.analysis?.missingKeywords?.map((s: string, i: number) => <li key={i} className="flex gap-2 items-start text-gray-700"><div className="mt-0.5 min-w-4 h-4 rounded bg-amber-50 text-amber-600 flex items-center justify-center text-[10px]">&times;</div><span className="text-xs leading-tight">{s}</span></li>)}
-                        {(!result.analysis?.missingKeywords || result.analysis.missingKeywords.length === 0) && <li className="text-green-600 font-medium text-xs flex items-center gap-1"><CheckCircle className="w-3 h-3"/> All keywords present</li>}
+                        {result.analysis?.missingKeywords?.map((s: string, i: number) => (
+                          <li key={i} className="flex gap-2 items-start text-white">
+                            <div className="mt-0.5 min-w-4 h-4 rounded bg-orange-brand/20 text-orange-200 border border-orange-brand/20 flex items-center justify-center text-[10px] font-bold">&times;</div>
+                            <span className="text-xs font-semibold leading-snug">{s}</span>
+                          </li>
+                        ))}
+                        {(!result.analysis?.missingKeywords || result.analysis.missingKeywords.length === 0) && (
+                          <li className="text-lime-brand font-bold text-xs flex items-center gap-1 uppercase tracking-wide"><CheckCircle className="w-3.5 h-3.5"/> All present</li>
+                        )}
                       </ul>
                    </div>
-                   <div className="p-4">
-                      <span className="text-[10px] font-bold uppercase tracking-widest text-gray-500 block mb-3">Skill Gaps</span>
+                   {/* Skill Gaps */}
+                   <div className="p-5">
+                      <span className="text-[10px] font-bold uppercase tracking-widest text-violet-200 block mb-3.5">Skill Gaps</span>
                       <ul className="space-y-2">
-                        {result.analysis?.skillGaps?.map((s: string, i: number) => <li key={i} className="flex gap-2 items-start text-gray-700"><div className="mt-0.5 min-w-4 h-4 rounded bg-red-50 text-red-600 flex items-center justify-center text-[10px]">&times;</div><span className="text-xs leading-tight">{s}</span></li>)}
-                        {(!result.analysis?.skillGaps || result.analysis.skillGaps.length === 0) && <li className="text-green-600 font-medium text-xs flex items-center gap-1"><CheckCircle className="w-3 h-3"/> No skill gaps found</li>}
+                        {result.analysis?.skillGaps?.map((s: string, i: number) => (
+                          <li key={i} className="flex gap-2 items-start text-white">
+                            <div className="mt-0.5 min-w-4 h-4 rounded bg-red-500/20 text-red-200 border border-red-500/20 flex items-center justify-center text-[10px] font-bold">&times;</div>
+                            <span className="text-xs font-semibold leading-snug">{s}</span>
+                          </li>
+                        ))}
+                        {(!result.analysis?.skillGaps || result.analysis.skillGaps.length === 0) && (
+                          <li className="text-lime-brand font-bold text-xs flex items-center gap-1 uppercase tracking-wide"><CheckCircle className="w-3.5 h-3.5"/> None found</li>
+                        )}
                       </ul>
                    </div>
-                   <div className="p-4">
-                      <span className="text-[10px] font-bold uppercase tracking-widest text-gray-500 block mb-3">ATS Formatting</span>
+                   {/* ATS Formatting */}
+                   <div className="p-5">
+                      <span className="text-[10px] font-bold uppercase tracking-widest text-violet-200 block mb-3.5">ATS Formatting</span>
                       <ul className="space-y-2">
-                        {result.analysis?.atsFormattingIssues?.map((s: string, i: number) => <li key={i} className="flex gap-2 items-start text-gray-700"><div className="mt-0.5 min-w-4 h-4 rounded bg-blue-50 text-blue-600 flex items-center justify-center text-[10px]">!</div><span className="text-xs leading-tight">{s}</span></li>)}
-                        {(!result.analysis?.atsFormattingIssues || result.analysis.atsFormattingIssues.length === 0) && <li className="text-green-600 font-medium text-xs flex items-center gap-1"><CheckCircle className="w-3 h-3"/> Perfect formatting</li>}
+                        {result.analysis?.atsFormattingIssues?.map((s: string, i: number) => (
+                          <li key={i} className="flex gap-2 items-start text-white">
+                            <div className="mt-0.5 min-w-4 h-4 rounded bg-blue-500/20 text-blue-200 border border-blue-500/20 flex items-center justify-center text-[10px] font-bold">!</div>
+                            <span className="text-xs font-semibold leading-snug">{s}</span>
+                          </li>
+                        ))}
+                        {(!result.analysis?.atsFormattingIssues || result.analysis.atsFormattingIssues.length === 0) && (
+                          <li className="text-lime-brand font-bold text-xs flex items-center gap-1 uppercase tracking-wide"><CheckCircle className="w-3.5 h-3.5"/> Perfect format</li>
+                        )}
                       </ul>
                    </div>
                 </div>
               </CardContent>
             </Card>
 
-            <Card className="shadow-lg border border-gray-200 bg-white rounded-xl">
-               <CardHeader className="flex flex-row items-center justify-between py-4 border-b border-gray-100 bg-gray-50/50 rounded-t-xl">
-                 <CardTitle className="text-sm font-bold uppercase tracking-wider text-gray-700">Live Preview</CardTitle>
+            {/* Document live preview */}
+            <Card className="border-0 shadow-lg bg-white rounded-3xl overflow-hidden">
+               <CardHeader className="flex flex-col sm:flex-row items-start sm:items-center justify-between py-4.5 px-6 gap-3 border-b border-dark-brand/10 bg-white">
+                 <CardTitle className="text-lg font-display uppercase tracking-wider text-dark-brand">Live Preview</CardTitle>
                  <div className="flex gap-2">
                    <Dialog>
-                     <DialogTrigger className="inline-flex h-8 items-center justify-center rounded-md border border-blue-200 bg-white px-3 text-xs font-medium text-blue-600 hover:bg-blue-50"><Eye className="w-4 h-4 mr-1"/> Full Preview</DialogTrigger>
-                     <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+                     <DialogTrigger className="inline-flex h-9 items-center justify-center rounded-xl border-2 border-violet-brand/20 bg-white px-4 text-xs font-bold text-violet-brand hover:bg-violet-brand/5 cursor-pointer"><Eye className="w-4 h-4 mr-1.5"/> Full Preview</DialogTrigger>
+                     <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto rounded-3xl border-0 p-8">
                        <DialogHeader>
-                         <DialogTitle className="text-gray-900">Live Preview</DialogTitle>
+                         <DialogTitle className="text-gray-900 font-display uppercase tracking-wider text-2xl">Live Preview</DialogTitle>
                        </DialogHeader>
-                       <div className="bg-white border border-gray-200 rounded p-8 mt-4 markdown-body font-serif text-sm text-black">
+                       <div className="bg-white border-2 border-dark-brand/10 rounded-2xl p-8 mt-4 markdown-body font-serif text-sm text-black">
                          <Markdown>{result.tailoredResumeMarkdown}</Markdown>
                        </div>
                      </DialogContent>
                    </Dialog>
-                   <Button variant="outline" size="sm" onClick={handleDownloadDocx} className="bg-white border-gray-200 text-gray-600 hover:bg-gray-50"><Download className="w-4 h-4 mr-1"/> DOCX</Button>
-                   <Button size="sm" onClick={handlePrint} className="bg-gray-900 text-white hover:bg-black"><FileText className="w-4 h-4 mr-1"/> PDF</Button>
+                   <Button variant="outline" size="sm" onClick={handleDownloadDocx} className="bg-white border-2 border-dark-brand/10 text-dark-brand font-bold rounded-xl hover:bg-gray-50 h-9 px-4 text-xs cursor-pointer"><Download className="w-4 h-4 mr-1.5"/> DOCX</Button>
+                   <Button size="sm" onClick={handlePrint} className="bg-dark-brand text-white font-bold rounded-xl hover:opacity-90 h-9 px-4 text-xs cursor-pointer"><FileText className="w-4 h-4 mr-1.5"/> PDF</Button>
                  </div>
                </CardHeader>
-               <CardContent className="p-0 bg-gray-100">
-                 <div className="bg-white m-4 p-8 overflow-y-auto h-[450px] shadow-sm ring-1 ring-gray-900/5 sm:rounded-sm prose prose-sm max-w-none text-black">
+               <CardContent className="p-0 bg-[#E2E8F0] py-8 px-4 flex justify-center">
+                 <div className="bg-white max-w-[800px] w-full p-10 overflow-y-auto h-[480px] shadow-xl rounded-md border border-dark-brand/5 prose prose-sm max-w-none text-black">
                    <div id="resume-markdown-content" className="markdown-body font-serif text-sm">
                      <Markdown>{result.tailoredResumeMarkdown}</Markdown>
                    </div>
@@ -457,17 +511,17 @@ export default function TailorForm() {
             </Card>
           </>
         ) : (
-          <div className="h-full border-2 border-dashed border-gray-200 rounded-2xl flex items-center justify-center text-gray-400 p-12 text-center bg-gray-50 flex-col gap-4">
+          <div className="h-full min-h-[400px] border-2 border-dashed border-dark-brand/10 rounded-3xl flex items-center justify-center text-gray-400 p-12 text-center bg-white flex-col gap-4 shadow-sm">
              {loading ? (
-               <>
-                 <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
-                 <p className="text-sm font-medium">AI is rewriting your experience... (~20s)</p>
-               </>
+                <>
+                  <Loader2 className="w-9 h-9 animate-spin text-violet-brand" />
+                  <p className="text-sm font-semibold uppercase tracking-wider text-dark-brand">Gemini AI is rewriting your experience... (~20s)</p>
+                </>
              ) : (
-               <>
-                 <FileText className="w-12 h-12 text-gray-300" />
-                 <p className="text-sm">Your tailored resume will appear here.</p>
-               </>
+                <>
+                  <FileText className="w-14 h-14 text-dark-brand/10" />
+                  <p className="text-sm font-semibold text-gray-400 uppercase tracking-wider">Your tailored resume will appear here</p>
+                </>
              )}
           </div>
         )}

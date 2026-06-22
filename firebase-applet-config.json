@@ -1,10 +1,9 @@
 {
-  "projectId": "pure-terra-0s7sz",
-  "appId": "1:997112659783:web:ea83b1286ae01e282bd662",
-  "apiKey": "AIzaSyCT1vZgu1YPjsv3A_Jf9UQzuEu-Jzdta-4",
-  "authDomain": "pure-terra-0s7sz.firebaseapp.com",
-  "firestoreDatabaseId": "ai-studio-b9cf2aed-8e59-45a1-b576-3e1a55083777",
-  "storageBucket": "pure-terra-0s7sz.firebasestorage.app",
-  "messagingSenderId": "997112659783",
-  "measurementId": ""
+  "apiKey": "AIzaSyA9CewhlAVIT_XZM0gzX3zKDryh6Y__eig",
+  "authDomain": "resume-c3a51.firebaseapp.com",
+  "projectId": "resume-c3a51",
+  "storageBucket": "resume-c3a51.firebasestorage.app",
+  "messagingSenderId": "386522500784",
+  "appId": "1:386522500784:web:52ab3867828aaa4b337575",
+  "measurementId": "G-6C06G6RD80"
 }
