@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { onAuthStateChanged, signInWithPopup, GoogleAuthProvider, signOut } from 'firebase/auth';
+import { onAuthStateChanged, signInWithPopup, signInWithRedirect, GoogleAuthProvider, signOut } from 'firebase/auth';
 import type { User } from 'firebase/auth';
 import { auth, db } from './firebase';
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
@@ -92,12 +92,26 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   }, []);
 
   const login = async () => {
+    const provider = new GoogleAuthProvider();
+    provider.addScope('email');
+    provider.addScope('profile');
     try {
-      const provider = new GoogleAuthProvider();
       await signInWithPopup(auth, provider);
     } catch (e: any) {
       console.error("Login failed:", e);
-      alert(`Sign-in failed: ${e.message || e}`);
+      const code = e?.code || '';
+      if (code === 'auth/operation-not-allowed') {
+        throw new Error('Google sign-in is not enabled. Please enable it in Firebase Console → Authentication → Sign-in method → Google.');
+      } else if (code === 'auth/popup-blocked' || code === 'auth/popup-closed-by-user') {
+        // Fallback to redirect
+        try {
+          await signInWithRedirect(auth, provider);
+        } catch (redirectErr: any) {
+          throw new Error(redirectErr.message || 'Sign-in redirect failed.');
+        }
+      } else {
+        throw new Error(e.message || 'Google sign-in failed. Check your network and try again.');
+      }
     }
   };
 
